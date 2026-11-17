@@ -1,0 +1,88 @@
+name: ci
+
+on:
+  push:
+    branches: ['kci/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install checksum-verified actionlint
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          tools="$(mktemp -d "$RUNNER_TEMP/custody-lint.XXXXXXXX")"
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          gh release download "v$ACTIONLINT_VERSION" --repo rhysd/actionlint \
+            --pattern "$archive" --dir "$tools"
+          printf '%s  %s\n' "$ACTIONLINT_SHA256" "$tools/$archive" | sha256sum -c -
+          tar -xzf "$tools/$archive" -C "$tools" actionlint
+          rm -- "$tools/$archive"
+          printf '%s\n' "$tools" >> "$GITHUB_PATH"
+      - name: Lint workflows and composite inline scripts
+        run: |
+          set -euo pipefail
+          actionlint
+          python3 -B ci/lint-composites.py
+          shellcheck -x --source-path=SCRIPTDIR actions/lib/oras.sh \
+            actions/qualified-store/store.sh actions/qualified-fetch/fetch.sh
+      - name: Exercise record validation and byte checks
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -v
+
+  store:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Make deterministic payloads
+        run: |
+          set -euo pipefail
+          python3 -B ci/fixtures.py create "$RUNNER_TEMP/custody-input"
+      - name: Store this candidate's exact bytes
+        uses: ./actions/qualified-store
+        with:
+          files: |
+            ${{ runner.temp }}/custody-input/nested/payload.txt
+            ${{ runner.temp }}/custody-input/payload with spaces.bin
+
+  qualified:
+    if: always()
+    needs: [lint, store]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every qualification job to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, sys
+          results = json.loads(os.environ['NEEDS'])
+          failed = [name for name, job in results.items() if job['result'] != 'success']
+          if failed:
+              print('Qualification refused: ' + ', '.join(failed))
+          sys.exit(bool(failed) or not results)
+          PY

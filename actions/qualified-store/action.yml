@@ -1,0 +1,37 @@
+name: Store qualified payloads
+description: Store candidate bytes and image digests in GHCR before qualification succeeds.
+inputs:
+  files:
+    description: Newline-separated regular files; basenames must be unique. Supply files or images.
+    required: false
+    default: ''
+  images:
+    description: Newline-separated name=ghcr.io/...@sha256:... image references already pushed by this run.
+    required: false
+    default: ''
+outputs:
+  digest:
+    description: SHA256 digest of the stored OCI manifest.
+    value: ${{ steps.store.outputs.digest }}
+runs:
+  using: composite
+  steps:
+    - id: store
+      shell: bash
+      env:
+        CUSTODY_ACTION_PATH: ${{ github.action_path }}
+        CUSTODY_EVENT_NAME: ${{ github.event_name }}
+        CUSTODY_REF: ${{ github.ref }}
+        CUSTODY_SHA: ${{ github.sha }}
+        CUSTODY_REPOSITORY: ${{ github.repository }}
+        CUSTODY_WORKFLOW_REF: ${{ github.workflow_ref }}
+        CUSTODY_RUN_ID: ${{ github.run_id }}
+        CUSTODY_RUN_ATTEMPT: ${{ github.run_attempt }}
+        CUSTODY_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        CUSTODY_ACTOR: ${{ github.actor }}
+        CUSTODY_FILES: ${{ inputs.files }}
+        CUSTODY_IMAGES: ${{ inputs.images }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        bash "$CUSTODY_ACTION_PATH/store.sh"

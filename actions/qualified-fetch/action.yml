@@ -1,0 +1,36 @@
+name: Fetch qualified payloads
+description: Fetch exact stored bytes only after the commit has a successful qualified Actions check.
+inputs:
+  sha:
+    description: Full candidate commit SHA.
+    required: false
+    default: ${{ github.sha }}
+  directory:
+    description: Destination directory for the verified files.
+    required: true
+outputs:
+  digest:
+    description: SHA256 digest of the verified OCI manifest.
+    value: ${{ steps.fetch.outputs.digest }}
+  directory:
+    description: Absolute destination directory.
+    value: ${{ steps.fetch.outputs.directory }}
+  images:
+    description: Absolute path to images.json, or empty when no images were stored.
+    value: ${{ steps.fetch.outputs.images }}
+runs:
+  using: composite
+  steps:
+    - id: fetch
+      shell: bash
+      env:
+        CUSTODY_ACTION_PATH: ${{ github.action_path }}
+        CUSTODY_SHA: ${{ inputs.sha }}
+        CUSTODY_DIRECTORY: ${{ inputs.directory }}
+        CUSTODY_REPOSITORY: ${{ github.repository }}
+        CUSTODY_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        CUSTODY_ACTOR: ${{ github.actor }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        bash "$CUSTODY_ACTION_PATH/fetch.sh"
